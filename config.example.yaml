@@ -1,0 +1,14 @@
+database:
+  host: localhost
+  port: 3306
+  user: aminder_admin
+  password: aminder_admin_password
+  name: aminder_db
+  # Connection Pool Settings
+  pool_size: 5          # Basic pool size
+  max_overflow: 10      # How many extra connections can be created above pool_size
+  pool_timeout: 30      # Seconds to wait before giving up on getting a connection
+  pool_recycle: 1800    # Recycle connections after this many seconds (prevents stale connections)
+app:
+  debug: true
+  title: "Aminder Backend"
