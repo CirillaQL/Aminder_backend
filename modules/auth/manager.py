@@ -1,49 +1,60 @@
-from typing import Optional, Dict
+from typing import Optional
 import httpx
 import uuid
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from fastapi import HTTPException, status
 from .schemas import UserCreate, UserResponse, UserLogin
+from .models import User, OAuthAccount
 from .security import get_password_hash, verify_password, create_access_token
 from utils.logger import logger
 
-# Mock Database for demonstration
-# In a real app, this would be a database session/repository
-fake_users_db: Dict[str, dict] = {}
-
 class AuthManager:
     """
-    Manages user authentication and registration including third-party providers.
+    Manages user authentication and registration using SQLAlchemy.
     """
+    def __init__(self, db: AsyncSession):
+        self.db = db
 
     async def register_email(self, user_in: UserCreate) -> UserResponse:
         """Register a new user with email and password."""
-        if self._get_user_by_email(user_in.email):
+        # Check if email exists
+        stmt = select(User).where(User.email == user_in.email)
+        result = await self.db.execute(stmt)
+        existing_user = result.scalar_one_or_none()
+
+        if existing_user:
             logger.warning(f"Registration failed: Email {user_in.email} already exists")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Email already registered"
             )
         
+        # Create new user
         user_id = str(uuid.uuid4())
         hashed_password = get_password_hash(user_in.password)
         
-        user_data = {
-            "id": user_id,
-            "email": user_in.email,
-            "hashed_password": hashed_password,
-            "is_active": True,
-            "auth_provider": "email"
-        }
+        new_user = User(
+            id=user_id,
+            email=user_in.email,
+            hashed_password=hashed_password,
+            is_active=True
+        )
         
-        fake_users_db[user_in.email] = user_data
+        self.db.add(new_user)
+        await self.db.commit()
+        await self.db.refresh(new_user)
+        
         logger.info(f"User registered: {user_in.email}")
-        
-        return UserResponse(**user_data)
+        return new_user
 
     async def login_email(self, user_in: UserLogin) -> dict:
         """Authenticate user with email and password and return token."""
-        user = self._get_user_by_email(user_in.email)
-        if not user or not verify_password(user_in.password, user["hashed_password"]):
+        stmt = select(User).where(User.email == user_in.email)
+        result = await self.db.execute(stmt)
+        user = result.scalar_one_or_none()
+
+        if not user or not user.hashed_password or not verify_password(user_in.password, user.hashed_password):
             logger.warning(f"Login failed for {user_in.email}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -51,14 +62,14 @@ class AuthManager:
                 headers={"WWW-Authenticate": "Bearer"},
             )
         
-        access_token = create_access_token(data={"sub": user["email"]})
+        access_token = create_access_token(data={"sub": user.email, "user_id": user.id})
         return {"access_token": access_token, "token_type": "bearer"}
 
     async def authenticate_google(self, token: str) -> dict:
         """
         Verify Google token and login/register user.
-        Assumes 'token' is an ID token or Access token that can be validated against Google's UserInfo endpoint.
         """
+        # 1. Verify token with Google (Mock/Real implementation)
         google_url = "https://www.googleapis.com/oauth2/v3/userinfo"
         headers = {"Authorization": f"Bearer {token}"}
         
@@ -72,17 +83,18 @@ class AuthManager:
                 raise HTTPException(status_code=400, detail="Invalid Google token")
 
         email = google_data.get("email")
-        if not email:
-            raise HTTPException(status_code=400, detail="Email not found in Google data")
+        oauth_id = google_data.get("sub") # Google's unique ID for the user
+        
+        if not email or not oauth_id:
+            raise HTTPException(status_code=400, detail="Invalid Google data (email or sub missing)")
 
-        return await self._social_login_get_token(email, "google")
+        return await self._handle_oauth_login(email, "google", oauth_id, token)
 
     async def authenticate_github(self, code: str) -> dict:
         """
         Exchange GitHub code for token and login/register user.
         """
-        # Note: In a real app, CLIENT_ID and CLIENT_SECRET must be configured
-        # This is a placeholder structure
+        # Placeholder credentials
         CLIENT_ID = "YOUR_GITHUB_CLIENT_ID" 
         CLIENT_SECRET = "YOUR_GITHUB_CLIENT_SECRET"
         
@@ -95,51 +107,113 @@ class AuthManager:
         }
         headers = {"Accept": "application/json"}
         
+        access_token = None
+        
         async with httpx.AsyncClient() as client:
             try:
-                # This call will fail without real credentials, handling gracefully for structure
                 # response = await client.post(token_url, json=payload, headers=headers)
                 # response.raise_for_status()
                 # access_token = response.json().get("access_token")
                 
-                # Mocking for the sake of the class structure without real creds
-                access_token = "mock_github_access_token" 
+                # Mock logic
+                access_token = "mock_github_access_token"
                 
                 # 2. Get User Info
-                user_url = "https://api.github.com/user"
-                # user_resp = await client.get(user_url, headers={"Authorization": f"Bearer {access_token}"})
-                # user_data = user_resp.json()
+                # user_resp = await client.get("https://api.github.com/user", headers={"Authorization": f"Bearer {access_token}"})
+                # github_data = user_resp.json()
                 
-                # Mock email
-                email = "mock_github@example.com" 
-                
+                github_data = {"email": "mock_github@example.com", "id": 123456}
+
             except Exception as e:
                 logger.error(f"GitHub auth failed: {e}")
                 raise HTTPException(status_code=400, detail="GitHub authentication failed")
 
-        return await self._social_login_get_token(email, "github")
-
-    async def _social_login_get_token(self, email: str, provider: str) -> dict:
-        """Helper to find or create a user from social login and return a JWT."""
-        user = self._get_user_by_email(email)
+        email = github_data.get("email")
+        # GitHub ID is integer, convert to string
+        oauth_id = str(github_data.get("id"))
         
+        if not email:
+             raise HTTPException(status_code=400, detail="Email not found in GitHub account")
+
+        return await self._handle_oauth_login(email, "github", oauth_id, access_token)
+
+    async def _handle_oauth_login(self, email: str, provider: str, oauth_id: str, access_token: str) -> dict:
+        """
+        Core logic for OAuth login/registration.
+        1. Check if OAuthAccount exists.
+        2. If not, check if User exists by email.
+        3. Link or Create.
+        """
+        # 1. Check if this OAuth account is already linked
+        stmt = select(OAuthAccount).where(
+            OAuthAccount.oauth_name == provider,
+            OAuthAccount.oauth_id == oauth_id
+        )
+        result = await self.db.execute(stmt)
+        oauth_account = result.scalar_one_or_none()
+
+        user = None
+
+        if oauth_account:
+            # Found linked account, get the user
+            # We need to load the user. Since we didn't eager load, we can query or assume relationship
+            # Let's query User to be safe and ensure it's active
+            stmt_user = select(User).where(User.id == oauth_account.user_id)
+            result_user = await self.db.execute(stmt_user)
+            user = result_user.scalar_one_or_none()
+            
+            # Optional: Update access token if changed
+            if oauth_account.access_token != access_token:
+                oauth_account.access_token = access_token
+                await self.db.commit()
+
+        else:
+            # OAuth account not found.
+            # 2. Check if user with this email exists
+            stmt_user = select(User).where(User.email == email)
+            result_user = await self.db.execute(stmt_user)
+            user = result_user.scalar_one_or_none()
+
+            if user:
+                # User exists, link new OAuth account
+                logger.info(f"Linking new {provider} account to existing user {email}")
+                new_oauth = OAuthAccount(
+                    user_id=user.id,
+                    oauth_name=provider,
+                    oauth_id=oauth_id,
+                    access_token=access_token
+                )
+                self.db.add(new_oauth)
+                await self.db.commit()
+            else:
+                # User does not exist, create User AND OAuthAccount
+                logger.info(f"Creating new user from {provider}: {email}")
+                user_id = str(uuid.uuid4())
+                user = User(
+                    id=user_id,
+                    email=email,
+                    hashed_password=None, # No password
+                    is_active=True
+                )
+                self.db.add(user)
+                # Flush to ensure user.id is ready (though we set it manually)
+                await self.db.flush() 
+                
+                new_oauth = OAuthAccount(
+                    user_id=user_id,
+                    oauth_name=provider,
+                    oauth_id=oauth_id,
+                    access_token=access_token
+                )
+                self.db.add(new_oauth)
+                await self.db.commit()
+
         if not user:
-            # Auto-register
-            user_id = str(uuid.uuid4())
-            user_data = {
-                "id": user_id,
-                "email": email,
-                "hashed_password": "", # No password for social users
-                "is_active": True,
-                "auth_provider": provider
-            }
-            fake_users_db[email] = user_data
-            logger.info(f"User auto-registered via {provider}: {email}")
-        
-        access_token = create_access_token(data={"sub": email})
-        return {"access_token": access_token, "token_type": "bearer"}
+             raise HTTPException(status_code=500, detail="Failed to retrieve or create user")
+            
+        if not user.is_active:
+             raise HTTPException(status_code=400, detail="User is inactive")
 
-    def _get_user_by_email(self, email: str) -> Optional[dict]:
-        return fake_users_db.get(email)
-
-auth_manager = AuthManager()
+        # Generate JWT
+        access_token_jwt = create_access_token(data={"sub": user.email, "user_id": user.id})
+        return {"access_token": access_token_jwt, "token_type": "bearer"}

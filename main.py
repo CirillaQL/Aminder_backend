@@ -5,6 +5,8 @@ from sqlalchemy import text
 from utils.logger import setup_logging
 from core.database import engine
 
+
+
 logger = setup_logging()
 
 @asynccontextmanager

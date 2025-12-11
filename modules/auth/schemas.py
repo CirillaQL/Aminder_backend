@@ -1,5 +1,6 @@
 from pydantic import BaseModel, EmailStr
-from typing import Optional
+from typing import Optional, List
+from datetime import datetime
 
 class Token(BaseModel):
     access_token: str
@@ -19,9 +20,20 @@ class UserLogin(BaseModel):
     email: EmailStr
     password: str
 
+class OAuthAccountResponse(BaseModel):
+    oauth_name: str
+    oauth_id: str
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
 class UserResponse(UserBase):
     id: str
-    auth_provider: str  # e.g., "email", "google", "github"
+    created_at: datetime
+    updated_at: datetime
+    # Optionally include linked accounts
+    oauth_accounts: List[OAuthAccountResponse] = []
 
     class Config:
         from_attributes = True
