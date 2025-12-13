@@ -12,3 +12,8 @@ database:
 app:
   debug: true
   title: "Aminder Backend"
+
+ai:
+  provider: "gemini"    # Options: gemini, openai
+  api_key: "your-api-key-here"
+  model: "gemini-pro"   # or gpt-4o, etc.

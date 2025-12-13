@@ -18,9 +18,15 @@ class AppConfig(BaseModel):
     debug: bool
     title: str
 
+class AIConfig(BaseModel):
+    provider: str
+    api_key: str
+    model: str
+
 class Settings(BaseModel):
     database: DatabaseConfig
     app: AppConfig
+    ai: AIConfig
 
     @classmethod
     def load_from_yaml(cls, path: str = "config.yaml") -> "Settings":

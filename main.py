@@ -4,6 +4,7 @@ import uvicorn
 from sqlalchemy import text
 from utils.logger import setup_logging
 from core.database import engine
+from modules.chat import router as chat_router
 
 
 
@@ -29,6 +30,8 @@ async def lifespan(app: FastAPI):
     logger.info("Database connections closed.")
 
 app = FastAPI(lifespan=lifespan)
+
+app.include_router(chat_router)
 
 @app.get("/")
 def read_root():

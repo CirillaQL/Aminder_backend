@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "aiomysql>=0.3.2",
     "fastapi>=0.124.2",
+    "google-generativeai>=0.8.5",
     "greenlet>=3.3.0",
     "httpx>=0.28.1",
     "passlib[bcrypt]>=1.7.4",
