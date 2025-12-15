@@ -1,8 +1,11 @@
-import math
+import json
+import re
+import sys
+import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
+from core.ai_provider.factory import AIProviderFactory
 
-# --- 1. 静态人格层: 大五人格 (OCEAN) ---
 @dataclass
 class BigFiveProfile:
     """
@@ -13,23 +16,9 @@ class BigFiveProfile:
     extraversion: float = 0.5      # 外向性 (E)
     agreeableness: float = 0.5     # 宜人性 (A)
     neuroticism: float = 0.5       # 神经质 (N)
-
-    def get_description(self) -> str:
-        """简单的文本描述，用于辅助 Prompt"""
-        traits = []
-        if self.openness > 0.7: traits.append("充满想象力")
-        elif self.openness < 0.3: traits.append("务实保守")
-        
-        if self.extraversion > 0.7: traits.append("热情外向")
-        elif self.extraversion < 0.3: traits.append("冷静内向")
-        
-        if self.agreeableness > 0.7: traits.append("友善体贴")
-        elif self.agreeableness < 0.3: traits.append("直率挑剔")
-        
-        if self.neuroticism > 0.7: traits.append("敏感易焦虑")
-        elif self.neuroticism < 0.3: traits.append("情绪极其稳定")
-        
-        return ", ".join(traits) or "性格中庸平和"
+    
+    # AI 生成的特征标签
+    traits: List[str] = field(default_factory=list)
 
 # --- 2. 动态状态层: PAD 三维情绪模型 ---
 @dataclass
@@ -84,167 +73,57 @@ class EmotionalState:
 
 # --- 3. 核心实体类 ---
 class Person(object):
-    def __init__(self, 
+    def __init__( 
+                 self, 
                  name: str, 
                  gender: str, 
-                 if_real: bool = False,
-                 # 允许初始化时自定义人格，否则默认中庸
-                 personality: Optional[BigFiveProfile] = None
+                 if_original: bool = False,
                  ):
         # 1. 基础信息
         self.name = name
-        self.if_real = if_real
+        self.if_original = if_original
         self.gender = gender
-        
-        # 2. 静态人格 (DNA)
-        self.personality = personality if personality else BigFiveProfile()
+        self.ai_client = AIProviderFactory.get_provider()
+
+        # 2. 大五人格
+        self.personality = BigFiveProfile()
         
         # 3. 动态状态 (State) - 初始为平静
         self.mood = EmotionalState()
         
-        # 4. [Placeholder] 记忆与知识 (暂空)
-        # self.memory_engine = BasicMemory(...)
-        
-    def receive_stimulus(self, valence_impact: float, arousal_impact: float):
-        """
-        核心交互机制：接收外界刺激，改变情绪。
-        
-        :param valence_impact: 刺激的正负向 (-1.0 挨骂 ~ 1.0 被夸)
-        :param arousal_impact: 刺激的激烈程度 (0.0 ~ 1.0)
-        """
-        # A. 基础情绪变化
-        d_p = valence_impact
-        d_a = arousal_impact
-        d_d = 0.0
-        
-        # B. 人格对情绪的修正 (Personality Bias)
-        # 例如：神经质(N)高的人，负面情绪会被放大
-        if self.personality.neuroticism > 0.7:
-            if d_p < 0: d_p *= 1.5  # 玻璃心：受到负面打击更重
-            d_a *= 1.2              # 易激动
+        # 4. 记忆与知识
+        # self.memory_engine = MemoryEngine() # 暂时注释掉，因为 MemoryEngine 未定义
+
+    async def init_big_five_profile(self, description: str):
+        """初始化大五人格配置"""
+        if self.if_original:
+            # if character is original, use description to set personality
+            description_prompt = f"""
+你是专业的心理学家，请根据以下角色描述，分析并量化该角色的大五人格特质 (0.0 ~ 1.0),并根据描述生成相应的traits：
+角色描述: {description}
+请只返回一个 JSON 格式的文本，格式如下，不要添加任何其他内容：
+{{
+  "openness": float,
+  "conscientiousness": float,
+  "extraversion": float,
+  "agreeableness": float,
+  "neuroticism": float,
+  "traits": ["trait1", "trait2", ...]
+}}
+"""
+            response = await self.ai_client.generate_response(description_prompt)
             
-        # 例如：宜人性(A)高的人，不容易产生攻击性(Dominance)
-        if self.personality.agreeableness > 0.7:
-             d_d -= 0.1
-             
-        # C. 优势度变化逻辑
-        # 如果是正向强刺激 -> 自信增加
-        if valence_impact > 0.5: d_d += 0.1
-        # 如果是负向强刺激 -> 可能会被激怒(D升) 或 被打压(D降)，取决于外向性
-        if valence_impact < -0.5:
-            if self.personality.extraversion > 0.6:
-                d_d += 0.2 #反击欲望
-            else:
-                d_d -= 0.2 #退缩
-
-        # 更新情绪
-        self.mood.update(d_p, d_a, d_d)
-        
-    def tick(self, hours_passed: float = 1.0):
-        """
-        时间流逝机制。建议由 Cron 或 消息间隔触发。
-        """
-        # 1. 情绪自然衰减
-        # 如果神经质高，情绪平复得慢
-        decay_rate = 0.2 if self.personality.neuroticism < 0.5 else 0.1
-        self.mood.decay(decay_rate * hours_passed)
-        
-        # 2. 能量恢复/消耗逻辑 (示例)
-        # self.mood.energy = ...
-
-    def get_system_prompt_context(self) -> str:
-        """
-        生成用于注入 LLM System Prompt 的上下文片段
-        """
-        return f"""
-Name: {self.name}
-Gender: {self.gender}
-Personality Traits: {self.personality.get_description()}
-[Current Emotional State]
-- Mood: {self.mood.get_mood_label()}
-- Inner Stats: Pleasure({self.mood.pleasure:.2f}), Arousal({self.mood.arousal:.2f}), Dominance({self.mood.dominance:.2f})
-"""
-
-    async def chat(self, user_input: str) -> str:
-        """
-        与角色对话
-        """
-        # Local import to avoid circular dependency issues if any, 
-        # and because this module might be imported where core isn't set up yet (though unlikely in this app structure)
-        from core.ai_provider import AIProviderFactory
-        
-        provider = AIProviderFactory.get_provider()
-        
-        system_prompt = f"""You are roleplaying as {self.name}.
-{self.get_system_prompt_context()}
-
-Reply to the user's input based on your personality and current mood. 
-Keep your response concise and in character.
-"""
-        # Construct the prompt. 
-        # Note: Depending on the provider (e.g. Chat vs Completion), the structure might differ.
-        # Here we assume the provider handles a raw string prompt or we should structure it better.
-        # For the base provider interface we defined earlier, it takes a prompt string and history.
-        # We will pass the system instruction + user input as the prompt for now.
-        
-        full_prompt = f"System: {system_prompt}\nUser: {user_input}"
-        
-        response = await provider.generate_response(prompt=full_prompt)
-        return response
-
-# --- 测试用例 ---
-if __name__ == "__main__":
-    import asyncio
-    import sys
-    import os
-    
-    # Ensure we can import from root
-    sys.path.append(os.getcwd())
-    
-    async def main():
-        # 1. 创建一个容易炸毛的傲娇角色 (高神经质，低宜人性)
-        persona_dna = BigFiveProfile(
-            openness=0.6,
-            conscientiousness=0.4,
-            extraversion=0.7,
-            agreeableness=0.2, # 毒舌
-            neuroticism=0.9    # 情绪化
-        )
-        
-        girl = Person(name="Asuka", gender="Female", personality=persona_dna)
-        
-        print(f"--- Chat with {girl.name} (Type 'quit' to exit) ---")
-        print(girl.get_system_prompt_context())
-        
-        while True:
             try:
-                user_input = input("\nYou: ")
-                if user_input.lower() in ["quit", "exit"]:
-                    break
-                
-                if not user_input.strip():
-                    continue
-
-                # 模拟简单的情绪刺激 (实际项目中应由 AI 分析语义或专门的模型判断)
-                if "stupid" in user_input.lower() or "hate" in user_input.lower():
-                    print("[System: Detected negative stimulus]")
-                    girl.receive_stimulus(-0.5, 0.8)
-                elif "love" in user_input.lower() or "good" in user_input.lower():
-                    print("[System: Detected positive stimulus]")
-                    girl.receive_stimulus(0.5, 0.2)
-                
-                # Update prompt context display to show state change
-                # print(f"[Debug State: P={girl.mood.pleasure:.2f} A={girl.mood.arousal:.2f}]")
-
-                response = await girl.chat(user_input)
-                print(f"{girl.name}: {response}")
-                
-                # 时间流逝模拟 (每次对话消耗一点精力/恢复一点情绪)
-                girl.tick(0.1)
-                
-            except KeyboardInterrupt:
-                break
+                print(f"[BigFive Init] AI Response: {response}")
+                # 移除可能存在的 markdown 代码块标记 (```json ... ```)
+                cleaned_response = re.sub(r'^```json\s*|\s*```$', '', response, flags=re.MULTILINE)
+                data = json.loads(cleaned_response)
+                self.personality.openness = max(0.0, min(1.0, data.get("openness", 0.5)))
+                self.personality.conscientiousness = max(0.0, min(1.0, data.get("conscientiousness", 0.5)))
+                self.personality.extraversion = max(0.0, min(1.0, data.get("extraversion", 0.5)))
+                self.personality.agreeableness = max(0.0, min(1.0, data.get("agreeableness", 0.5)))
+                self.personality.neuroticism = max(0.0, min(1.0, data.get("neuroticism", 0.5)))
+                self.personality.traits = data.get("traits", [])
             except Exception as e:
-                print(f"Error: {e}")
-
-    asyncio.run(main())
+                print(f"[BigFive Init Error] {e}")
+        

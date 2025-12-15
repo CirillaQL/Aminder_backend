@@ -5,7 +5,7 @@ class BaseAIProvider(ABC):
     """Abstract base class for AI providers."""
     
     @abstractmethod
-    async def generate_response(self, prompt: str, history: List[Dict[str, str]] = None) -> str:
+    async def generate_response(self, prompt: str) -> str:
         """
         Generate a response from the AI model.
         

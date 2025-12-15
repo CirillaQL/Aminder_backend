@@ -1,7 +1,6 @@
 from typing import Optional
 from .base import BaseAIProvider
 from .gemini import GeminiProvider
-from .openai import OpenAIProvider
 from core.config import settings
 
 class AIProviderFactory:
@@ -18,8 +17,6 @@ class AIProviderFactory:
         
         if provider_type == "gemini":
             cls._instance = GeminiProvider(api_key=api_key, model=model)
-        elif provider_type == "openai":
-            cls._instance = OpenAIProvider(api_key=api_key, model=model)
         else:
             raise ValueError(f"Unsupported AI provider: {provider_type}")
             

@@ -17,3 +17,9 @@ ai:
   provider: "gemini"    # Options: gemini, openai
   api_key: "your-api-key-here"
   model: "gemini-pro"   # or gpt-4o, etc.
+
+memory:
+  provider: "openmemory"
+  mode: "remote"
+  url: "http://localhost:8080"
+  api_key: "your-memory-api-key"

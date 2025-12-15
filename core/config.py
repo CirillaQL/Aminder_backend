@@ -1,7 +1,7 @@
 import yaml
 from pathlib import Path
 from pydantic import BaseModel
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 class DatabaseConfig(BaseModel):
     host: str
@@ -23,10 +23,24 @@ class AIConfig(BaseModel):
     api_key: str
     model: str
 
+class EmbeddingsConfig(BaseModel):
+    provider: str
+    api_key: str
+    model: Optional[str] = None
+
+class OpenMemoryConfig(BaseModel):
+    mode: str = "remote"
+    url: Optional[str] = None
+    api_key: Optional[str] = None
+    path: Optional[str] = "./memory.sqlite"
+    tier: Optional[str] = "smart"
+    embeddings: Optional[EmbeddingsConfig] = None
+
 class Settings(BaseModel):
     database: DatabaseConfig
     app: AppConfig
     ai: AIConfig
+    memory: Optional[OpenMemoryConfig] = None
 
     @classmethod
     def load_from_yaml(cls, path: str = "config.yaml") -> "Settings":
