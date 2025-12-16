@@ -94,12 +94,12 @@ class Person(object):
         # 4. 记忆与知识
         # self.memory_engine = MemoryEngine() # 暂时注释掉，因为 MemoryEngine 未定义
 
-    async def init_big_five_profile(self, description: str):
+    async def init_big_five_profile(self, description: str) -> BigFiveProfile:
         """初始化大五人格配置"""
         if self.if_original:
             # if character is original, use description to set personality
             description_prompt = f"""
-你是专业的心理学家，请根据以下角色描述，分析并量化该角色的大五人格特质 (0.0 ~ 1.0),并根据描述生成相应的traits：
+你是专业的心理学家，请根据以下角色描述，分析并量化该角色的大五人格特质 (0.0 ~ 1.0),并根据描述生成相应的定格traits：
 角色描述: {description}
 请只返回一个 JSON 格式的文本，格式如下，不要添加任何其他内容：
 {{
@@ -111,12 +111,14 @@ class Person(object):
   "traits": ["trait1", "trait2", ...]
 }}
 """
-            response = await self.ai_client.generate_response(description_prompt)
+            response = self.ai_client.generate_response(description_prompt, web_search=False)
             
             try:
                 print(f"[BigFive Init] AI Response: {response}")
+                if response is None:
+                    raise ValueError("No response from AI client.")
                 # 移除可能存在的 markdown 代码块标记 (```json ... ```)
-                cleaned_response = re.sub(r'^```json\s*|\s*```$', '', response, flags=re.MULTILINE)
+                cleaned_response = re.sub(r'^```json\s*|\s*```$', '', response.strip(), flags=re.MULTILINE)
                 data = json.loads(cleaned_response)
                 self.personality.openness = max(0.0, min(1.0, data.get("openness", 0.5)))
                 self.personality.conscientiousness = max(0.0, min(1.0, data.get("conscientiousness", 0.5)))
@@ -126,4 +128,36 @@ class Person(object):
                 self.personality.traits = data.get("traits", [])
             except Exception as e:
                 print(f"[BigFive Init Error] {e}")
-        
+        else:
+            # character is not original, so we need to search web and use description to set personality.
+            description_prompt = f"""
+你是专业的心理学家, 请联网检索角色 {self.name} 的信息，并根据以下角色描述，分析并量化该角色的大五人格特质 (0.0 ~ 1.0),并根据描述生成相应的定格traits：
+角色描述: {description}
+请只返回一个 JSON 格式的文本，格式如下，不要添加任何其他内容：
+{{
+  "openness": float,
+  "conscientiousness": float,
+  "extraversion": float,
+  "agreeableness": float,
+  "neuroticism": float,
+  "traits": ["trait1", "trait2", ...]
+}}
+"""
+            response = self.ai_client.generate_response(description_prompt, web_search=True)
+            try:
+                print(f"[BigFive Init] AI Response: {response}")
+                if response is None:
+                    raise ValueError("No response from AI client.")
+                # 移除可能存在的 markdown 代码块标记 (```json ... ```)
+                cleaned_response = re.sub(r'^```json\s*|\s*```$', '', response.strip(), flags=re.MULTILINE)
+                data = json.loads(cleaned_response)
+                self.personality.openness = max(0.0, min(1.0, data.get("openness", 0.5)))
+                self.personality.conscientiousness = max(0.0, min(1.0, data.get("conscientiousness", 0.5)))
+                self.personality.extraversion = max(0.0, min(1.0, data.get("extraversion", 0.5)))
+                self.personality.agreeableness = max(0.0, min(1.0, data.get("agreeableness", 0.5)))
+                self.personality.neuroticism = max(0.0, min(1.0, data.get("neuroticism", 0.5)))
+                self.personality.traits = data.get("traits", [])
+            except Exception as e:
+                print(f"[BigFive Init Error] {e}")
+
+        return self.personality
