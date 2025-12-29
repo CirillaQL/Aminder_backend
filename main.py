@@ -1,9 +1,10 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import uvicorn
-from sqlalchemy import text
+# from sqlalchemy import text
 from utils.logger import setup_logging
-from core.database import engine
+# from core.database import engine
 from modules.chat import router as chat_router
 from modules.personas.router import router as personas_router
 
@@ -13,22 +14,34 @@ logger = setup_logging()
 async def lifespan(app: FastAPI):
     # Startup: Connect to the database
     logger.info("Starting up application...")
-    try:
-        async with engine.begin() as conn:
-            await conn.execute(text("SELECT 1"))
-        logger.info("Database connection established and pool created.")
-    except Exception as e:
-        logger.error(f"Failed to connect to database: {e}")
-        raise e
+    # try:
+    #     async with engine.begin() as conn:
+    #         await conn.execute(text("SELECT 1"))
+    #     logger.info("Database connection established and pool created.")
+    # except Exception as e:
+    #     logger.error(f"Failed to connect to database: {e}")
+    #     raise e
     
     yield
     
     # Shutdown: Close database connections
     logger.info("Shutting down application...")
-    await engine.dispose()
-    logger.info("Database connections closed.")
+    # await engine.dispose()
+    # logger.info("Database connections closed.")
 
 app = FastAPI(lifespan=lifespan)
+
+origins = [
+    "http://localhost:5173",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.include_router(chat_router)
 app.include_router(personas_router)

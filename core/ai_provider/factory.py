@@ -1,6 +1,6 @@
 from typing import Optional
 from .base import BaseAIProvider
-from .gemini import GeminiProvider
+from .litellm_provider import LiteLLMProvider
 from core.config import settings
 
 class AIProviderFactory:
@@ -15,8 +15,9 @@ class AIProviderFactory:
         api_key = settings.ai.api_key
         model = settings.ai.model
         
-        if provider_type == "gemini":
-            cls._instance = GeminiProvider(api_key=api_key, model=model)
+        # We use LiteLLMProvider for 'gemini' and potentially other providers
+        if provider_type == "gemini" or provider_type == "litellm":
+            cls._instance = LiteLLMProvider(api_key=api_key, model=model)
         else:
             raise ValueError(f"Unsupported AI provider: {provider_type}")
             

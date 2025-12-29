@@ -7,7 +7,9 @@ from fastapi import HTTPException, status
 from .schemas import UserCreate, UserResponse, UserLogin
 from .models import User, OAuthAccount
 from .security import get_password_hash, verify_password, create_access_token
-from utils.logger import logger
+import logging
+
+logger = logging.getLogger(__name__)
 
 class AuthManager:
     """
